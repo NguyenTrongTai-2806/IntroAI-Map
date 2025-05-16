@@ -12,12 +12,29 @@
 </head>
 <body>
   <div id="map"></div>
+  <div id="adminControlPanel" style="position: absolute; top: 10px; left: 10px; background-color: white; padding: 15px; border: 1px solid #ccc; border-radius: 5px; z-index: 1000; font-family: Arial, sans-serif;">
+    <h4>Admin Controls</h4>
+    <button id="btnToggleBlockMode">Bắt đầu/Dừng Chặn Đường</button>
+    <div id="blockingInstructions" style="display: none; margin-top: 10px;">
+        <p>Click vào các node liên tiếp để chọn đoạn đường cần chặn. Click lại vào node đã chọn để bỏ chọn.</p>
+        <button id="btnConfirmBlockSegment" disabled>Xác nhận Chặn Đoạn Này</button>
+        <button id="btnClearSelection">Xóa Lựa Chọn Hiện Tại</button>
+    </div>
+    <div style="margin-top: 10px;">
+        <button id="btnShowBlockedSegments">Hiện/Ẩn Các Đoạn Đã Chặn</button>
+    </div>
+    <div id="blockedSegmentsList" style="margin-top:10px; max-height: 200px; overflow-y:auto; display:none;">
+        <p><strong>Các đoạn đường đã chặn:</strong></p>
+        {/* Danh sách các đoạn bị chặn sẽ được thêm vào đây bằng JavaScript */}
+    </div>
+</div>
   <script>
     // =======================================================================
     // PHẦN CODE MỚI THÊM VÀO (ĐỊNH NGHĨA GRAPH, THUẬT TOÁN)
     // =======================================================================
 
     // 1. Dữ liệu đồ thị (Nodes và Graph)
+    // Các nút này nên là các giao lộ, điểm uốn cong quan trọng
     const nodes = {
     'node1': {lat: 21.024768, lng: 105.811503},
     'node2': {lat: 21.024212, lng: 105.811586},
@@ -500,7 +517,8 @@
     }
 
 
-    // Định nghĩa các cạnh 
+    // Định nghĩa các cạnh và trọng số (khoảng cách)
+    // Bạn cần xây dựng graph này cẩn thận dựa trên bản đồ thực tế
     const graph = {
     'node1': [
         { node: 'node2' }
@@ -939,7 +957,8 @@
         { node: 'node108' }
       ],
     'node108': [
-        { node: 'node421' }
+        { node: 'node421' },
+        { node: 'node107' },
       ],
     'node109': [
         { node: 'node110' },
@@ -1533,7 +1552,8 @@
     'node234': [
         { node: 'node233' },
         { node: 'node236' },
-        { node: 'node337' }
+        { node: 'node337' },
+        { node: 'node235' }
       ],
     'node235': [
         { node: 'node234' },
@@ -2439,7 +2459,7 @@
     }
 
     // 3. Thuật toán A* (phiên bản cơ bản)
-    function aStarSearch(graphData, nodeData, startNodeId, endNodeId) {
+    function aStarSearch(graphData, nodeData, startNodeId, endNodeId, blockedSegmentsArray) {
         let openSet = new Set([startNodeId]); // Các nút đang chờ duyệt
         let cameFrom = {}; // Lưu trữ nút cha để dựng lại đường đi
 
@@ -2466,6 +2486,7 @@
         }
 
         while (openSet.size > 0) {
+            // ... (phần tìm 'current' node giữ nguyên) ...
             let current = null;
             let lowestFScore = Infinity;
             for (let nodeId of openSet) {
@@ -2485,60 +2506,288 @@
             for (let neighborEdge of graphData[current]) {
                 let neighborNodeId = neighborEdge.node;
 
-                // Tính khoảng cách on-the-fly giữa current node và neighborNodeId
-                let distanceToNeighbor = calculateDistanceBetweenNodeCoords(nodeData[current], nodeData[neighborNodeId]);
-                // =======================
+                if (!nodeData[neighborNodeId] || (nodeData[neighborNodeId].lat === 0 && nodeData[neighborNodeId].lng === 0)) {
+                continue;
+            }
 
-                // gScore của hàng xóm qua nút hiện tại
-                let tentativeGScore = gScore[current] + distanceToNeighbor; // Sử dụng distanceToNeighbor vừa tính
-
-                if (tentativeGScore < (gScore[neighborNodeId] === undefined ? Infinity : gScore[neighborNodeId])) {
-                    // Đây là đường đi tốt hơn đến neighborNodeId
-                    cameFrom[neighborNodeId] = current;
-                    gScore[neighborNodeId] = tentativeGScore;
-                    fScore[neighborNodeId] = gScore[neighborNodeId] + heuristic(nodeData[neighborNodeId], nodeData[endNodeId]);
-                    if (!openSet.has(neighborNodeId)) {
-                        openSet.add(neighborNodeId);
+            // === KIỂM TRA CẠNH BỊ CHẶN ===
+            let isEdgeBlocked = false;
+            if (blockedSegmentsArray && blockedSegmentsArray.length > 0) {
+                for (const segment of blockedSegmentsArray) {
+                    // Một cạnh (current -> neighborNodeId) bị chặn nếu nó là một phần của một segment bị chặn
+                    for (let i = 0; i < segment.length - 1; i++) {
+                        if (segment[i] === current && segment[i+1] === neighborNodeId) {
+                            isEdgeBlocked = true;
+                            break;
+                        }
+                        // Kiểm tra chiều ngược: neighborNodeId -> current
+                        if (segment[i] === neighborNodeId && segment[i+1] === current) {
+                            isEdgeBlocked = true;
+                            break;
+                        }
                     }
+                    if (isEdgeBlocked) break;
+                }
+            }
+            if (isEdgeBlocked) {
+                // console.log(`Edge ${current} -> ${neighborNodeId} is blocked.`);
+                continue; // Bỏ qua cạnh này
+            }
+            // =============================
+
+            let distanceToNeighbor = calculateDistanceBetweenNodeCoords(nodeData[current], nodeData[neighborNodeId]);
+            if (distanceToNeighbor === Infinity || isNaN(distanceToNeighbor)) {
+                continue;
+            }
+
+            let tentativeGScore = gScore[current] + distanceToNeighbor;
+
+            if (tentativeGScore < (gScore[neighborNodeId] === undefined ? Infinity : gScore[neighborNodeId])) {
+                cameFrom[neighborNodeId] = current;
+                gScore[neighborNodeId] = tentativeGScore;
+                if (nodeData[neighborNodeId] && nodeData[endNodeId]){
+                    fScore[neighborNodeId] = gScore[neighborNodeId] + heuristic(nodeData[neighborNodeId], nodeData[endNodeId]);
+                } else {
+                    fScore[neighborNodeId] = Infinity;
+                }
+                if (!openSet.has(neighborNodeId)) {
+                    openSet.add(neighborNodeId);
                 }
             }
         }
-        return null; // Không tìm thấy đường đi
+    }
+    // console.log("Pathfinding failed, openSet became empty.");
+        return null;
     }
 
     //4. Hàm hiển thị node trên bản đồ
     // --- ĐOẠN CODE ĐỂ HIỂN THỊ CÁC NODES LÊN BẢN ĐỒ ---
+    // Sửa đổi hàm displayGraphNodes
     function displayGraphNodes(nodesToDisplay, mapInstance) {
+        // Xóa các marker cũ (nếu có)
+        for (const nodeId in nodeMarkers) {
+            if (nodeMarkers.hasOwnProperty(nodeId)) {
+                nodeMarkers[nodeId].setMap(null);
+            }
+        }
+        nodeMarkers = {}; // Reset đối tượng lưu marker
+
         for (const nodeId in nodesToDisplay) {
-            if (nodesToDisplay.hasOwnProperty(nodeId)) {
+            if (nodesToDisplay.hasOwnProperty(nodeId) && nodesToDisplay[nodeId].lat !== 0 && nodesToDisplay[nodeId].lng !== 0) {
                 const nodeData = nodesToDisplay[nodeId];
-                new google.maps.Marker({
+                const marker = new google.maps.Marker({
                     position: { lat: nodeData.lat, lng: nodeData.lng },
                     map: mapInstance,
-                    title: `Node ID: ${nodeId}\nTên: ${nodeData.name || 'Không có tên'}`, // Hiển thị ID và tên khi hover
-                    icon: {
-                        path: google.maps.SymbolPath.CIRCLE, // Hình tròn
-                        scale: 5, // Kích thước
-                        fillColor: "blue", // Màu nền
-                        fillOpacity: 0.8,
-                        strokeColor: "white", // Màu viền
-                        strokeWeight: 1
-                    },
-                    label: { // Hiển thị một nhãn nhỏ 
-                        text: nodeId.replace('node','').replace('_',''), // Hiển thị ID rút gọn
-                        color: "white", // Màu chữ của nhãn
+                    title: `Node ID: ${nodeId}`,
+                    icon: getNodeMarkerIcon(nodeId), // Sử dụng hàm mới để lấy icon
+                    label: {
+                        text: nodeId.replace('node','').substring(0,3),
+                        color: "white",
                         fontSize: "10px"
                     }
+                });
+
+                // Lưu marker lại để có thể tương tác
+                nodeMarkers[nodeId] = marker;
+
+                // Gắn sự kiện click (sẽ được kích hoạt/hủy kích hoạt bởi isAdminBlockingMode)
+                marker.addListener('click', () => {
+                    handleNodeMarkerClickForBlocking(nodeId);
                 });
             }
         }
     }
-    // --- KẾT THÚC ĐOẠN CODE HIỂN THỊ NODES ---
+    // Phần chặn đường 
+    // --- BIẾN TOÀN CỤC CHO CHỨC NĂNG CHẶN ĐƯỜNG ---
+let isAdminBlockingMode = false; // Trạng thái admin có đang ở chế độ chọn node để chặn không
+let currentSelectedNodesForBlocking = []; // Mảng lưu các nodeId admin đang chọn tạm thời
+let blockedSegments = []; // Mảng lưu các đoạn đường đã bị chặn, ví dụ: [['node1', 'node2'], ['node5', 'node8', 'node9']]
+let nodeMarkers = {}; // Để lưu trữ các đối tượng marker của node, giúp tương tác (thêm/xóa listener)
+let tempBlockPathPolyline = null; // Polyline để hiển thị đoạn đang chọn
+let blockedPathPolylines = []; // Mảng lưu các polyline của các đoạn đã bị chặn
+
+// --- HÀM TIỆN ÍCH CHO CHỨC NĂNG CHẶN ĐƯỜNG ---
+
+// Hàm tải các đoạn đường đã chặn từ localStorage
+function loadBlockedSegments() {
+    const savedSegments = localStorage.getItem('blockedSegmentsData');
+    if (savedSegments) {
+        blockedSegments = JSON.parse(savedSegments);
+    } else {
+        blockedSegments = [];
+    }
+}
+
+// Hàm lưu các đoạn đường đã chặn vào localStorage
+function saveBlockedSegments() {
+    localStorage.setItem('blockedSegmentsData', JSON.stringify(blockedSegments));
+}
+
+// Hàm vẽ lại các đoạn đường đã bị chặn (màu đỏ)
+function redrawBlockedSegments(mapInstance) {
+    // Xóa các polyline cũ
+    blockedPathPolylines.forEach(polyline => polyline.setMap(null));
+    blockedPathPolylines = [];
+
+    blockedSegments.forEach(segmentNodeIds => {
+        if (segmentNodeIds.length < 2) return;
+        let segmentCoords = segmentNodeIds.map(nodeId => ({ lat: nodes[nodeId].lat, lng: nodes[nodeId].lng }));
+        const blockedPolyline = new google.maps.Polyline({
+            path: segmentCoords,
+            geodesic: true,
+            strokeColor: '#FF0000', // Màu đỏ cho đường bị chặn
+            strokeOpacity: 0.8,
+            strokeWeight: 5,
+            map: mapInstance,
+            zIndex: google.maps.Marker.MAX_ZINDEX + 1 // Đảm bảo nó nổi lên trên
+        });
+        blockedPathPolylines.push(blockedPolyline);
+    });
+}
+
+// Hàm cập nhật hiển thị danh sách các đoạn đã chặn trong panel admin
+function updateBlockedSegmentsListDisplay() {
+    const listDiv = document.getElementById('blockedSegmentsList');
+    if (!listDiv) return;
+    listDiv.innerHTML = '<p><strong>Các đoạn đường đã chặn:</strong></p>';
+    if (blockedSegments.length === 0) {
+        listDiv.innerHTML += '<p><em>Chưa có đoạn nào bị chặn.</em></p>';
+        return;
+    }
+    const ul = document.createElement('ul');
+    blockedSegments.forEach((segment, index) => {
+        const li = document.createElement('li');
+        li.textContent = segment.join(' -> ');
+        const removeButton = document.createElement('button');
+        removeButton.textContent = 'Bỏ chặn';
+        removeButton.style.marginLeft = '10px';
+        removeButton.onclick = function() {
+            const removedSegment = blockedSegments.splice(index, 1)[0]; // Lấy ra đoạn vừa xóa
+            saveBlockedSegments();
+            redrawBlockedSegments(map); // map là biến global của Google Map instance
+            updateBlockedSegmentsListDisplay();
+            // Cập nhật lại icon cho các node thuộc đoạn vừa được bỏ chặn
+            if (removedSegment) {
+                removedSegment.forEach(nodeId => {
+                    // Chỉ cập nhật nếu node đó không còn thuộc bất kỳ đoạn bị chặn nào khác
+                    let stillBlocked = false;
+                    for (const segment of blockedSegments) {
+                        if (segment.includes(nodeId)) {
+                            stillBlocked = true;
+                            break;
+                        }
+                    }
+                    if (!stillBlocked && nodeMarkers[nodeId]) {
+                        // Nếu không còn bị chặn và không phải là node đang được chọn trong chế độ chặn
+                        const isCurrentlySelectedForBlocking = currentSelectedNodesForBlocking.includes(nodeId);
+                        nodeMarkers[nodeId].setIcon(getNodeMarkerIcon(nodeId, false, isCurrentlySelectedForBlocking));
+                    }
+                });
+            }
+        };
+        li.appendChild(removeButton);
+        ul.appendChild(li);
+    });
+    listDiv.appendChild(ul);
+}
 
 
+// Hàm xử lý khi click vào một node marker ở chế độ chặn đường
+function handleNodeMarkerClickForBlocking(nodeId) {
+    if (!isAdminBlockingMode) return;
+
+    const nodeIndex = currentSelectedNodesForBlocking.indexOf(nodeId);
+    if (nodeIndex > -1) { // Nếu node đã được chọn -> bỏ chọn
+        currentSelectedNodesForBlocking.splice(nodeIndex, 1);
+        nodeMarkers[nodeId].setIcon(getNodeMarkerIcon(nodeId, false)); // Trả lại icon thường
+    } else { // Nếu node chưa được chọn -> thêm vào lựa chọn
+        // Kiểm tra tính liên tiếp (nếu không phải node đầu tiên)
+        if (currentSelectedNodesForBlocking.length > 0) {
+            const lastSelectedNode = currentSelectedNodesForBlocking[currentSelectedNodesForBlocking.length - 1];
+            // Kiểm tra xem nodeId có phải là hàng xóm của lastSelectedNode không
+            const neighborsOfLast = graph[lastSelectedNode] ? graph[lastSelectedNode].map(edge => edge.node) : [];
+            if (!neighborsOfLast.includes(nodeId)) {
+                alert("Vui lòng chọn node liên tiếp với node đã chọn trước đó!");
+                return;
+            }
+        }
+        currentSelectedNodesForBlocking.push(nodeId);
+        nodeMarkers[nodeId].setIcon(getNodeMarkerIcon(nodeId, true, true)); // Icon cho node đang chọn
+    }
+
+    // Cập nhật polyline tạm thời hiển thị đoạn đang chọn
+    if (tempBlockPathPolyline) {
+        tempBlockPathPolyline.setMap(null);
+    }
+    if (currentSelectedNodesForBlocking.length >= 2) {
+        let tempCoords = currentSelectedNodesForBlocking.map(id => ({ lat: nodes[id].lat, lng: nodes[id].lng }));
+        tempBlockPathPolyline = new google.maps.Polyline({
+            path: tempCoords,
+            strokeColor: '#FFA500', // Màu cam cho đoạn đang chọn
+            strokeOpacity: 0.7,
+            strokeWeight: 6,
+            map: map, // map là biến global của Google Map instance
+            zIndex: google.maps.Marker.MAX_ZINDEX // Nổi lên trên đường thường, dưới đường bị chặn
+        });
+    }
+    document.getElementById('btnConfirmBlockSegment').disabled = currentSelectedNodesForBlocking.length < 2;
+}
+
+// Hàm tạo icon cho node marker (thường, bị chặn, đang chọn)
+function getNodeMarkerIcon(nodeId, isSelectedForBlocking = false, isCurrentlySelected = false) {
+    let fillColor = "blue"; // Mặc định
+    let scale = 5;
+
+    // Kiểm tra xem node có nằm trong một đoạn đã bị chặn không
+    let isPartOfBlockedSegment = false;
+    for (const segment of blockedSegments) {
+        if (segment.includes(nodeId)) {
+            isPartOfBlockedSegment = true;
+            break;
+        }
+    }
+
+    if (isCurrentlySelected) {
+        fillColor = "#FFA500"; // Cam cho node đang được chọn để chặn
+        scale = 7;
+    } else if (isSelectedForBlocking || isPartOfBlockedSegment) { // isSelectedForBlocking không còn dùng trực tiếp ở đây nữa, thay bằng isPartOfBlockedSegment
+        fillColor = "red"; // Đỏ cho node thuộc đoạn đã bị chặn
+        scale = 6;
+    }
+
+
+    return {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: scale,
+        fillColor: fillColor,
+        fillOpacity: 0.9,
+        strokeColor: "white",
+        strokeWeight: 1
+    };
+}
+
+
+
+
+
+
+
+
+
+
+
+//==================================================================================
+
+
+
+
+    var map; 
     // =======================================================================
+    // PHẦN CODE GỐC CỦA BẠN (CÓ CHỈNH SỬA NHỎ ĐỂ TÍCH HỢP)
     // =======================================================================
     function initMap() {
+    // Tải các đoạn đường đã chặn từ localStorage
+    loadBlockedSegments();
     var langHa = { lat: 21.0175, lng: 105.81 };
 
     var map = new google.maps.Map(document.getElementById('map'), {
@@ -2549,15 +2798,14 @@
     // Gọi hàm để vẽ các node lên bản đồ (đảm bảo hàm displayGraphNodes và biến nodes đã được định nghĩa ở phạm vi toàn cục)
     if (typeof displayGraphNodes === 'function' && typeof nodes !== 'undefined') {
         displayGraphNodes(nodes, map);
-    } else {
-        console.error("displayGraphNodes function or nodes variable is not defined globally.");
-    }
+    } 
+    redrawBlockedSegments(map); // Vẽ lại các đoạn đường đã bị chặn
 
 
-    var langHaCoordinates = [ 
+    var langHaCoordinates = [ // Giữ nguyên của bạn
       { lat: 21.024927161629794, lng: 105.81145650153924},
       { lat: 21.02486433010351, lng: 105.81151220877237 },
-      { lat: 21.021483, lng: 105.811960 }, 
+      { lat: 21.021483, lng: 105.811960 }, // Kiểm tra lại tọa độ này nếu cần
       { lat: 21.021380727022844, lng: 105.81100123426229 },
       { lat: 21.020411037192908, lng: 105.81056817615364 },
       { lat: 21.020045372752882, lng: 105.81133469166919 },
@@ -2635,7 +2883,7 @@
     });
 
     var totalDistance = 0;
-    var path = new google.maps.Polyline({
+    var pathPolyline = new google.maps.Polyline({
                 path: [],
                 geodesic: true,
                 strokeColor: '#3399FF',
@@ -2651,7 +2899,7 @@
             flag = 1 - flag;
             if (flag == 1) // Đặt điểm bắt đầu
             {
-                path.setPath([]);
+                pathPolyline.setPath([]);
                 markerEnd.setPosition(null);
                 markerStart.setPosition(clickedLocation);
                 totalDistance = 0; // Reset distance khi đặt điểm mới
@@ -2681,7 +2929,7 @@
                         console.log("Start and end nodes are the same or map to the same nearest node.");
                     } else {
                         // Gọi A* để tìm đường đi giữa các node
-                        const foundNodeIdsPath = aStarSearch(graph, nodes, startNodeId, endNodeId);
+                        const foundNodeIdsPath = aStarSearch(graph, nodes, startNodeId, endNodeId, blockedSegments);
 
                         if (foundNodeIdsPath && foundNodeIdsPath.length > 0) {
                             console.log("A* path found:", foundNodeIdsPath);
@@ -2760,33 +3008,138 @@
                         }
                     }
                 }
-                path.setPath(finalPathCoordinates);
+                pathPolyline.setPath(finalPathCoordinates);
             }
         }
     });
 
     let infoWindow = new google.maps.InfoWindow();
 
-    path.addListener('mouseover', function(event) {
+    pathPolyline.addListener('mouseover', function(event) {
         infoWindow.setContent(`Total distance: ${totalDistance.toFixed(2)}m`);
         infoWindow.setPosition(event.latLng);
         infoWindow.open(map);
     });
 
-    path.addListener('mouseout', function() {
+    pathPolyline.addListener('mouseout', function() {
         infoWindow.close();
     });
 
     map.addListener('click', function(mapsMouseEvent)
     {
+        if (isAdminBlockingMode) return; // Không làm gì nếu đang ở chế độ chặn đường
         flag = 0;
         var clickedLocation = mapsMouseEvent.latLng;
         if (!google.maps.geometry.poly.containsLocation(clickedLocation, langHaArea))
         {
             markerStart.setPosition(null);
             markerEnd.setPosition(null);
-            path.setPath([]);
+            pathPolyline.setPath([]);
             totalDistance = 0; // Reset distance khi click ra ngoài
+        }
+    });
+    // --- GẮN SỰ KIỆN CHO CÁC NÚT ADMIN ---
+    document.getElementById('btnToggleBlockMode').addEventListener('click', function() {
+        isAdminBlockingMode = !isAdminBlockingMode;
+        const instructionsDiv = document.getElementById('blockingInstructions');
+        if (isAdminBlockingMode) {
+            this.textContent = 'Dừng Chặn Đường';
+            instructionsDiv.style.display = 'block';
+            alert("Chế độ chặn đường đã BẬT. Click vào các node để chọn đoạn đường.");
+            // Thay đổi icon của tất cả các node để cho biết có thể click
+            for (const nodeId in nodeMarkers) {
+                nodeMarkers[nodeId].setIcon(getNodeMarkerIcon(nodeId, false, currentSelectedNodesForBlocking.includes(nodeId)));
+            }
+        } else {
+            this.textContent = 'Bắt đầu Chặn Đường';
+            instructionsDiv.style.display = 'none';
+            // Reset lựa chọn tạm thời và polyline tạm thời
+            currentSelectedNodesForBlocking.forEach(nodeId => { // Đảm bảo các node đang chọn được reset icon đúng
+                if(nodeMarkers[nodeId]) nodeMarkers[nodeId].setIcon(getNodeMarkerIcon(nodeId));
+            });
+            currentSelectedNodesForBlocking = [];
+            if (tempBlockPathPolyline) {
+                tempBlockPathPolyline.setMap(null);
+                tempBlockPathPolyline = null;
+            }
+            document.getElementById('btnConfirmBlockSegment').disabled = true;
+            // Trả lại icon bình thường cho các node
+            for (const nodeId in nodeMarkers) {
+                if (nodeMarkers.hasOwnProperty(nodeId)) {
+                    nodeMarkers[nodeId].setIcon(getNodeMarkerIcon(nodeId));
+                }
+            }
+            alert("Chế độ chặn đường đã TẮT.");
+        }
+    });
+
+    document.getElementById('btnConfirmBlockSegment').addEventListener('click', function() {
+        if (currentSelectedNodesForBlocking.length < 2) {
+            alert("Vui lòng chọn ít nhất 2 node để tạo thành một đoạn đường.");
+            return;
+        }
+        // Kiểm tra xem đoạn này đã tồn tại chưa (để tránh trùng lặp)
+        const newSegmentStr = currentSelectedNodesForBlocking.join(',');
+        let alreadyExists = false;
+        for(const segment of blockedSegments) {
+            if (segment.join(',') === newSegmentStr) {
+                alreadyExists = true;
+                break;
+            }
+        }
+
+        if (alreadyExists) {
+            alert("Đoạn đường này đã được chặn trước đó.");
+        } else {
+            blockedSegments.push([...currentSelectedNodesForBlocking]); // Lưu một bản sao
+            saveBlockedSegments();
+            redrawBlockedSegments(map);
+            updateBlockedSegmentsListDisplay(); // Cập nhật danh sách hiển thị
+            alert(`Đã chặn đoạn: ${currentSelectedNodesForBlocking.join(' -> ')}`);
+        }
+
+        // Reset cho lần chọn tiếp theo
+        const justBlockedSegment = [...currentSelectedNodesForBlocking]; // Lưu lại để cập nhật icon
+
+        currentSelectedNodesForBlocking = [];
+        if (tempBlockPathPolyline) {
+            tempBlockPathPolyline.setMap(null);
+            tempBlockPathPolyline = null;
+        }
+        this.disabled = true;
+        // Cập nhật lại icon của tất cả các node sau khi xác nhận
+        // Đặc biệt là các node vừa được thêm vào đoạn chặn
+        justBlockedSegment.forEach(nodeId => {
+            if (nodeMarkers[nodeId]) {
+                nodeMarkers[nodeId].setIcon(getNodeMarkerIcon(nodeId)); // getNodeMarkerIcon sẽ tự kiểm tra blockedSegments
+            }
+        }) ;
+    });
+
+    document.getElementById('btnClearSelection').addEventListener('click', function() {
+        currentSelectedNodesForBlocking.forEach(nodeId => {
+            if (nodeMarkers[nodeId]) {
+                // Khi xóa lựa chọn, node đó có thể vẫn thuộc một đoạn đã bị chặn trước đó
+                nodeMarkers[nodeId].setIcon(getNodeMarkerIcon(nodeId));
+    }
+        });
+        currentSelectedNodesForBlocking = [];
+        if (tempBlockPathPolyline) {
+            tempBlockPathPolyline.setMap(null);
+            tempBlockPathPolyline = null;
+        }
+        document.getElementById('btnConfirmBlockSegment').disabled = true;
+    });
+
+    document.getElementById('btnShowBlockedSegments').addEventListener('click', function() {
+        const listDiv = document.getElementById('blockedSegmentsList');
+        if (listDiv.style.display === 'none') {
+            updateBlockedSegmentsListDisplay();
+            listDiv.style.display = 'block';
+            this.textContent = 'Ẩn Các Đoạn Đã Chặn';
+        } else {
+            listDiv.style.display = 'none';
+            this.textContent = 'Hiện Các Đoạn Đã Chặn';
         }
     });
   }
