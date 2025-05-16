@@ -18,8 +18,6 @@
     // =======================================================================
 
     // 1. Dữ liệu đồ thị (Nodes và Graph)
-    // Đây là ví dụ rất nhỏ, bạn cần mở rộng nó ra cho toàn bộ khu Láng Hạ
-    // Các nút này nên là các giao lộ, điểm uốn cong quan trọng
     const nodes = {
     'node1': {lat: 21.024768, lng: 105.811503},
     'node2': {lat: 21.024212, lng: 105.811586},
@@ -502,8 +500,7 @@
     }
 
 
-    // Định nghĩa các cạnh và trọng số (khoảng cách)
-    // Bạn cần xây dựng graph này cẩn thận dựa trên bản đồ thực tế
+    // Định nghĩa các cạnh 
     const graph = {
     'node1': [
         { node: 'node2' }
@@ -2469,7 +2466,6 @@
         }
 
         while (openSet.size > 0) {
-            // ... (phần tìm 'current' node giữ nguyên) ...
             let current = null;
             let lowestFScore = Infinity;
             for (let nodeId of openSet) {
@@ -2489,7 +2485,6 @@
             for (let neighborEdge of graphData[current]) {
                 let neighborNodeId = neighborEdge.node;
 
-                // === THAY ĐỔI Ở ĐÂY ===
                 // Tính khoảng cách on-the-fly giữa current node và neighborNodeId
                 let distanceToNeighbor = calculateDistanceBetweenNodeCoords(nodeData[current], nodeData[neighborNodeId]);
                 // =======================
@@ -2521,7 +2516,6 @@
                     position: { lat: nodeData.lat, lng: nodeData.lng },
                     map: mapInstance,
                     title: `Node ID: ${nodeId}\nTên: ${nodeData.name || 'Không có tên'}`, // Hiển thị ID và tên khi hover
-                    // Tùy chỉnh icon nếu muốn các node trông khác biệt
                     icon: {
                         path: google.maps.SymbolPath.CIRCLE, // Hình tròn
                         scale: 5, // Kích thước
@@ -2530,7 +2524,7 @@
                         strokeColor: "white", // Màu viền
                         strokeWeight: 1
                     },
-                    label: { // Hiển thị một nhãn nhỏ (ví dụ: ID của node)
+                    label: { // Hiển thị một nhãn nhỏ 
                         text: nodeId.replace('node','').replace('_',''), // Hiển thị ID rút gọn
                         color: "white", // Màu chữ của nhãn
                         fontSize: "10px"
@@ -2543,7 +2537,6 @@
 
 
     // =======================================================================
-    // PHẦN CODE GỐC CỦA BẠN (CÓ CHỈNH SỬA NHỎ ĐỂ TÍCH HỢP)
     // =======================================================================
     function initMap() {
     var langHa = { lat: 21.0175, lng: 105.81 };
@@ -2561,10 +2554,10 @@
     }
 
 
-    var langHaCoordinates = [ // Giữ nguyên của bạn
+    var langHaCoordinates = [ 
       { lat: 21.024927161629794, lng: 105.81145650153924},
       { lat: 21.02486433010351, lng: 105.81151220877237 },
-      { lat: 21.021483, lng: 105.811960 }, // Kiểm tra lại tọa độ này nếu cần
+      { lat: 21.021483, lng: 105.811960 }, 
       { lat: 21.021380727022844, lng: 105.81100123426229 },
       { lat: 21.020411037192908, lng: 105.81056817615364 },
       { lat: 21.020045372752882, lng: 105.81133469166919 },
@@ -2799,7 +2792,6 @@
   }
 
   </script>
-  <!-- Quan trọng: Thay YOUR_API_KEY bằng API Key của bạn -->
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDTUO3uE5ySdbJUCmcbymI5RBfW-cRZCng&callback=initMap&libraries=geometry" async defer></script>
 </body>
 </html>
